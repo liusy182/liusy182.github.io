@@ -13,17 +13,13 @@
         })(window, document, 'script', 'https://www.google-analytics.com/analytics.js', 'ga');
 
         ga('create', 'UA-77182256-2', 'auto');
-        ga('send', 'pageview');
+        ga('send', 'pageview', {
+            hitCallback: function() { window.location.href = "https://github.com/liusy182"; }
+        });
     </script>
     <!-- End Google Analytics -->
 </head>
 <body>
     <p>Hang on there...</p>
-    <!-- <script>
-        setTimeout(() => {
-            window.location.href = "https://github.com/liusy182";
-        }, 3000)
-    </script> -->
-    
 </body>
 </html>
