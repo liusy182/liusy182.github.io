@@ -1,0 +1,67 @@
+---
+layout: post
+title: A simple firewall using Linux Kernel Module (LKM), part1
+date: 2013-05-14 14:30:33.000000000 +08:00
+type: post
+published: true
+status: publish
+categories: []
+tags:
+- c#
+- Linux
+- LKM
+meta:
+  _publicize_pending: '1'
+  _edit_last: '37851649'
+---
+<p>This topic is from a lab I did for one of my master courses on systems security. The objective of this lab was to design and implement a firewall using Linux Kernel Module programming. The firewall should support 3 basic operations through a command line interface:</p>
+<p>1. adding rules. For example,</p>
+<p>&gt;&gt;minifirewall --out --destip 172.20.33.22 --proto UDP --action UNBLOCK</p>
+<p>Will unblock the outgoing UDP packets if the destination is 172.20.33.22.</p>
+<p>&gt;&gt;minifirewall --in --srcip 172.16.0.0 --srcnetmask 255.255.0.0 --destport 80 --proto TCP --action BLOCK</p>
+<p>Will block all incoming TCP packets from the 172.16.0.0/16 network if the packets are directed towards port 80.</p>
+<p>2. print rules. For example,</p>
+<p>&gt;&gt;minifirewall --print</p>
+<p>Will print out all rules defined.</p>
+<p>3. delete a rule. For example,</p>
+<p>&gt;&gt;minifirewall --delete 3</p>
+<p>Will delete the 3rd rule.</p>
+<p>This was my first experience with Linux system, so I was a bit excited about this lab. Writing this thing in C program also reminded me the beauty of this language (having not using C for almost 4 years!). Generally, 3 things are required to make the firewall work:</p>
+<p>1. a command line parser to parse user input. This program should run at user space.</p>
+<p>2. my own firewall logic that is hooked up with Netfilter which is a subsystem in the Linux Kernel. This program should run as a Linux Kernel Module (LKM).</p>
+<p>3. a channel to communicate with my firewall (a LKM) from user space.</p>
+<p>I defined a structure to hold data that is shared across LKM and user space.</p>
+<pre><code>
+struct PolicyCache {</p>
+<p>Operation operation;</p>
+<p>int index; // delete index, set when operation == DEL</p>
+<p>IP srcip;</p>
+<p>IP srcnetmask;</p>
+<p>unsigned int srcport;</p>
+<p>IP destip;</p>
+<p>IP destnetmask;</p>
+<p>unsigned int destport;</p>
+<p>Protocol proto;</p>
+<p>Action action;</p>
+<p>struct PolicyCache* next;</p>
+<p>};<br />
+</pre></code>
+<p>PolicyCache is actually a linked list that can host a list of firewall policies. The Operation, IP, Protocol and Action in the struct are nothing but enum and customized data types.</p>
+<pre><code>
+<p>typedef enum {</p>
+<p>NOOP, IN, OUT, DEL, PRINT</p>
+<p>}Operation;</p>
+<p>typedef enum {</p>
+<p>NOPROTOCOL, ALL, UDP, TCP, ICMP</p>
+<p>}Protocol;</p>
+<p>typedef enum {</p>
+<p>NOACTION, BLOCK, UNBLOCK</p>
+<p>}Action;</p>
+<p>typedef struct {</p>
+<p>unsigned char seg1;</p>
+<p>unsigned char seg2;</p>
+<p>unsigned char seg3;</p>
+<p>unsigned char seg4;</p>
+<p>}IP;</p>
+</pre></code>
+<p>That is enough for an introduction. I will continue on my next post with more interesting LKM programming stuffs.</p>

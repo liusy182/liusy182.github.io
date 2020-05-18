@@ -1,0 +1,401 @@
+---
+layout: post
+title: A simple firewall using Linux Kernel Module (LKM), part4
+date: 2013-06-17 12:00:59.000000000 +08:00
+type: post
+published: true
+status: publish
+categories: []
+tags:
+- c#
+- Linux
+- LKM
+meta:
+  _publicize_pending: '1'
+  _edit_last: '37851649'
+---
+<p>Finally it comes to the core part of this firewall:) First, we register the LKM by using API init_module()</p>
+<pre><code>
+int init_module(void)<br />
+{<br />
+ printk(KERN_INFO &quot;in init_module.\n&quot;);<br />
+ bufferSpace = (char *) vmalloc(MAXLEN);<br />
+ if(bufferSpace)<br />
+ {<br />
+ memset(bufferSpace, 0, MAXLEN);<br />
+ procEntry = create_proc_entry(PROCFILE, 0666, NULL);</p>
+<p>if (procEntry!=NULL)<br />
+ {<br />
+ // initialize linked list<br />
+ head = NULL;</p>
+<p> // define read_proc and write_proc<br />
+ procEntry-&gt;read_proc = proc_read;<br />
+ procEntry-&gt;write_proc = proc_write;</p>
+<p> // register hook in / out<br />
+ hookIn.hook = hook_func_in;<br />
+ hookIn.hooknum = NF_INET_LOCAL_IN;<br />
+ hookIn.pf = PF_INET;<br />
+ hookIn.priority = NF_IP_PRI_FIRST;<br />
+ nf_register_hook(&amp;hookIn);</p>
+<p> hookOut.hook = hook_func_out;<br />
+ hookOut.hooknum = NF_INET_LOCAL_OUT;<br />
+ hookOut.pf = PF_INET;<br />
+ hookOut.priority = NF_IP_PRI_FIRST;<br />
+ nf_register_hook(&amp;hookOut);<br />
+ printk(KERN_INFO &quot;init_module: kernel module created\n&quot;);<br />
+ return 0;<br />
+ }<br />
+ else<br />
+ {<br />
+ vfree(bufferSpace);<br />
+ printk(KERN_INFO &quot;init_module: create proc entry failed.\n&quot;);<br />
+ return -ENOMEM;<br />
+ }<br />
+ }<br />
+ else<br />
+ {<br />
+ printk(KERN_INFO &quot;init_module: allocate bufferSpace failed.\n&quot;);<br />
+ return -ENOMEM;<br />
+ }</p>
+<p>}<br />
+
+</pre></code>
+<p>Correspondingly there is a cleanup_module() API that needs to be overridden. This is called when we unload this LKM.</p>
+<pre><code>
+void cleanup_module(void)<br />
+{<br />
+ struct PolicyCache *curItem;<br />
+ struct PolicyCache *space;<br />
+ printk(KERN_INFO &quot;in cleanup_module.\n&quot;);</p>
+<p> nf_unregister_hook(&amp;hookIn);<br />
+ nf_unregister_hook(&amp;hookOut);</p>
+<p> curItem = head;<br />
+ while(curItem != NULL)<br />
+ {<br />
+ space = curItem;<br />
+ curItem = curItem-&gt;next;<br />
+ kfree(space);<br />
+ }<br />
+ vfree(bufferSpace);<br />
+ remove_proc_entry(PROCFILE, NULL);<br />
+ printk(KERN_INFO &quot;kernel module unloaded.\n&quot;);<br />
+}</p>
+</pre></code>
+<p>Notice that in the init_module(), we registered 2 methods, proc_read() and proc_write(), to handle reading and writing to LKM from user space respectively. We also registered to 2 Netfilter functions- hook_func_in() and hook_func_out() in which we handle incoming and outgoing requests respectively. Here is the complete code for this LKM:</p>
+<pre><code>
+#include &lt;linux/module.h&gt;<br />
+#include &lt;linux/kernel.h&gt;<br />
+#include &lt;linux/proc_fs.h&gt;<br />
+#include &lt;linux/list.h&gt;<br />
+#include &lt;linux/netfilter.h&gt;<br />
+#include &lt;linux/netfilter_ipv4.h&gt;<br />
+#include &lt;linux/tcp.h&gt;<br />
+#include &lt;linux/udp.h&gt;<br />
+#include &lt;linux/ip.h&gt;<br />
+#include &lt;linux/icmp.h&gt;<br />
+#include &lt;linux/skbuff.h&gt;<br />
+#include &lt;asm/uaccess.h&gt;<br />
+#include &quot;datatype.h&quot;</p>
+<p>MODULE_LICENSE(&quot;GPL&quot;);<br />
+MODULE_DESCRIPTION(&quot;LINUX FIREWALL&quot;);<br />
+MODULE_AUTHOR(&quot;SIYUAN LIU&quot;);</p>
+<p>#define PROCFILE &quot;firewall_sy&quot;<br />
+#define MAXLEN sizeof(struct PolicyCache)</p>
+<p>static struct PolicyCache* head;</p>
+<p>static struct proc_dir_entry *procEntry;<br />
+//static unsigned int bufferIndex = 0;<br />
+static char* bufferSpace;</p>
+<p>static struct nf_hook_ops hookIn;<br />
+static struct nf_hook_ops hookOut;<br />
+unsigned int GetMaskedIP(IP ip, IP mask)<br />
+{<br />
+ unsigned int ipAddr = (ip.seg4 &lt;&lt; 24) | (ip.seg3 &lt;&lt; 16) | (ip.seg2 &lt;&lt; 8) | (ip.seg1);<br />
+ unsigned int maskAddr = (mask.seg4 &lt;&lt; 24) | (mask.seg3 &lt;&lt; 16) | (mask.seg2 &lt;&lt; 8) | (mask.seg1);<br />
+ return (ipAddr &amp; maskAddr);<br />
+}</p>
+<p>void DeletePolicy(int index)<br />
+{<br />
+ struct PolicyCache* curItem = head;<br />
+ struct PolicyCache* preItem = NULL;<br />
+ int i = 1;<br />
+ printk(KERN_INFO &quot;in DeletePolicy.\n&quot;);<br />
+ if(index &lt;= 0)<br />
+ {<br />
+ printk(KERN_INFO &quot;DeletePolicy: index &lt;= 0.\n&quot;);<br />
+ return;<br />
+ }</p>
+<p> while(curItem != NULL &amp;&amp; i &lt; index)<br />
+ {<br />
+ preItem = curItem;<br />
+ curItem = curItem-&gt;next;<br />
+ i++;<br />
+ }</p>
+<p> if(i == index &amp;&amp; curItem != NULL)<br />
+ {<br />
+ // item is head<br />
+ if(index == 1)<br />
+ {<br />
+ head = head-&gt;next;<br />
+ }<br />
+ // item is not head<br />
+ else<br />
+ {<br />
+ preItem-&gt;next = curItem-&gt;next;<br />
+ }<br />
+ kfree(curItem);<br />
+ }<br />
+}</p>
+<p>void AddPolicy(struct PolicyCache* newItem)<br />
+{<br />
+ struct PolicyCache* curItem = head;<br />
+ if(head == NULL)<br />
+ {<br />
+ printk(KERN_INFO &quot;AddPolicy(): head is null\n&quot;);<br />
+ head = newItem;<br />
+ }<br />
+ else<br />
+ {<br />
+ printk(KERN_INFO &quot;AddPolicy(): head is not null\n&quot;);<br />
+ while(curItem-&gt;next != NULL)<br />
+ {<br />
+ curItem = curItem-&gt;next;<br />
+ }<br />
+ curItem-&gt;next = newItem;<br />
+ }<br />
+}</p>
+<p>int proc_read(char *page, char **start, off_t off, int count, int *eof, void *data)<br />
+{<br />
+ int counter = 0;<br />
+ struct PolicyCache *curItem = head;</p>
+<p> printk(KERN_INFO &quot;in proc_read.\n&quot;);<br />
+ if (off &gt; 0)<br />
+ {<br />
+ printk(KERN_INFO &quot;proc_read(): off &gt; 0.\n&quot;);<br />
+ *eof = 1;<br />
+ return 0;<br />
+ }</p>
+<p> if (head == NULL)<br />
+ {<br />
+ printk(KERN_INFO &quot;proc_read(): the linked list is empty.\n&quot;);<br />
+ return 0;<br />
+ }</p>
+<p> do<br />
+ {<br />
+ memcpy(page + sizeof(struct PolicyCache) * counter, curItem, sizeof(struct PolicyCache));<br />
+ counter++;<br />
+ curItem = curItem-&gt;next;<br />
+ } while(curItem != NULL);</p>
+<p> return sizeof(struct PolicyCache) * counter;<br />
+}</p>
+<p>int proc_write(struct file *filp, const char *buffer, unsigned long len, void *data)<br />
+{<br />
+ int ret = 0;<br />
+ struct PolicyCache* curItem = kmalloc(sizeof(struct PolicyCache), GFP_KERNEL);<br />
+ printk(KERN_INFO &quot;in proc_write.\n&quot;);</p>
+<p> if (curItem == NULL)<br />
+ {<br />
+ printk(KERN_INFO &quot;proc_write: allocate memory for curItem failed.\n&quot;);<br />
+ return -ENOMEM;<br />
+ }</p>
+<p> if (len &gt; MAXLEN + 1)<br />
+ {<br />
+ printk(KERN_INFO &quot;proc_write: bufferSpace is full.\n&quot;);<br />
+ return -EFAULT;<br />
+ }</p>
+<p> if (copy_from_user(curItem, buffer, sizeof(struct PolicyCache)))<br />
+ {<br />
+ printk(KERN_INFO &quot;proc_write: copy_from_user failed.\n&quot;);<br />
+ return -EFAULT;<br />
+ }</p>
+<p> //add operation<br />
+ if (curItem-&gt;operation == IN || curItem-&gt;operation == OUT)<br />
+ {<br />
+ printk(KERN_INFO &quot;proc_write: add operation.\n&quot;);<br />
+ AddPolicy(curItem);<br />
+ ret = len;<br />
+ }<br />
+ //delete operation<br />
+ else if (curItem-&gt;operation == DEL)<br />
+ {<br />
+ printk(KERN_INFO &quot;proc_write: delete operation.\n&quot;);<br />
+ DeletePolicy(curItem-&gt;index);<br />
+ kfree(curItem);<br />
+ ret = len;<br />
+ }<br />
+ else<br />
+ {<br />
+ printk(KERN_INFO &quot;proc_write: neither ADD nor DELETE operation. skip it.\n&quot;);<br />
+ }<br />
+ return ret;<br />
+}<br />
+unsigned int hook_func_out(unsigned int hooknum, struct sk_buff *skb,<br />
+ const struct net_device *in, const struct net_device *out,<br />
+ int (*okfn)(struct sk_buff *))<br />
+{<br />
+ struct iphdr *ipHeader = (struct iphdr *)skb_network_header(skb);<br />
+ unsigned int srcip = ipHeader-&gt;saddr;<br />
+ unsigned int destip = ipHeader-&gt;daddr;<br />
+ unsigned int protocol = ipHeader-&gt;protocol;<br />
+ unsigned int srcport = 0;<br />
+ unsigned int destport = 0;<br />
+ struct udphdr *udpHeader;<br />
+ struct tcphdr *tcpHeader;<br />
+ struct icmphdr *icmpHeader;<br />
+ struct PolicyCache *curItem;<br />
+ unsigned int policySrcMaskedIp = 0;<br />
+ unsigned int policyDestMaskedIp = 0;<br />
+ printk(KERN_INFO &quot;in hook_func_out.\n&quot;);<br />
+ if (protocol == IPPROTO_UDP)<br />
+ {<br />
+ udpHeader = (struct udphdr *)(skb_transport_header(skb));<br />
+ srcport = (unsigned int)ntohs(udpHeader-&gt;source);<br />
+ destport = (unsigned int)ntohs(udpHeader-&gt;dest);<br />
+ }<br />
+ else if (protocol == IPPROTO_TCP)<br />
+ {<br />
+ tcpHeader = (struct tcphdr *)(skb_transport_header(skb));<br />
+ srcport = (unsigned int)ntohs(tcpHeader-&gt;source);<br />
+ destport = (unsigned int)ntohs(tcpHeader-&gt;dest);<br />
+ }<br />
+ else if (protocol == IPPROTO_ICMP)<br />
+ {<br />
+ icmpHeader = (struct icmphdr *)(skb_transport_header(skb));<br />
+ }</p>
+<p> //traverse linked list to find a match<br />
+ for(curItem = head;curItem != NULL; curItem = curItem-&gt;next)<br />
+ {<br />
+ if(curItem-&gt;operation != OUT)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> if(curItem-&gt;proto == UDP &amp;&amp; protocol != IPPROTO_UDP)<br />
+ {<br />
+ continue;<br />
+ }<br />
+ else if(curItem-&gt;proto == TCP &amp;&amp; protocol != IPPROTO_TCP)<br />
+ {<br />
+ continue;<br />
+ }<br />
+ else if(curItem-&gt;proto == ICMP &amp;&amp; protocol != IPPROTO_ICMP)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> if(curItem-&gt;srcport != 0 &amp;&amp;curItem-&gt;srcport != srcport)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> if(curItem-&gt;destport != 0 &amp;&amp; curItem-&gt;destport != destport)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> policySrcMaskedIp = GetMaskedIP(curItem-&gt;srcip, curItem-&gt;srcnetmask);<br />
+ if(policySrcMaskedIp != 0 &amp;&amp; policySrcMaskedIp != srcip)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> policyDestMaskedIp = GetMaskedIP(curItem-&gt;destip, curItem-&gt;destnetmask);<br />
+ if(policyDestMaskedIp != 0 &amp;&amp; policyDestMaskedIp != destip)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> if(curItem-&gt;action == UNBLOCK)<br />
+ {<br />
+ return NF_ACCEPT;<br />
+ }<br />
+ else if(curItem-&gt;action == BLOCK)<br />
+ {<br />
+ return NF_DROP;<br />
+ }</p>
+<p> }<br />
+ return NF_ACCEPT;<br />
+}</p>
+<p>unsigned int hook_func_in(unsigned int hooknum, struct sk_buff *skb,<br />
+ const struct net_device *in, const struct net_device *out,<br />
+ int (*okfn)(struct sk_buff *))<br />
+{<br />
+ struct iphdr *ipHeader = (struct iphdr *)skb_network_header(skb);<br />
+ unsigned int srcip = ipHeader-&gt;saddr;<br />
+ unsigned int destip = ipHeader-&gt;daddr;<br />
+ unsigned int protocol = ipHeader-&gt;protocol;<br />
+ unsigned int srcport = 0;<br />
+ unsigned int destport = 0;<br />
+ struct udphdr *udpHeader;<br />
+ struct tcphdr *tcpHeader;<br />
+ struct icmphdr *icmpHeader;<br />
+ struct PolicyCache *curItem;<br />
+ unsigned int policySrcMaskedIp = 0;<br />
+ unsigned int policyDestMaskedIp = 0;<br />
+ printk(KERN_INFO &quot;in hook_func_in.\n&quot;);<br />
+ if (protocol == IPPROTO_UDP)<br />
+ {<br />
+ udpHeader = (struct udphdr *)(skb_transport_header(skb));<br />
+ srcport = (unsigned int)ntohs(udpHeader-&gt;source);<br />
+ destport = (unsigned int)ntohs(udpHeader-&gt;dest);<br />
+ }<br />
+ else if (protocol == IPPROTO_TCP)<br />
+ {<br />
+ tcpHeader = (struct tcphdr *)(skb_transport_header(skb));<br />
+ srcport = (unsigned int)ntohs(tcpHeader-&gt;source);<br />
+ destport = (unsigned int)ntohs(tcpHeader-&gt;dest);<br />
+ }<br />
+ else if (protocol == IPPROTO_ICMP)<br />
+ {<br />
+ icmpHeader = (struct icmphdr *)(skb_transport_header(skb));<br />
+ }</p>
+<p> //traverse linked list to find a match<br />
+ for(curItem = head;curItem != NULL; curItem = curItem-&gt;next)<br />
+ {<br />
+ if(curItem-&gt;operation != IN)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> if(curItem-&gt;proto == UDP &amp;&amp; protocol != IPPROTO_UDP)<br />
+ {<br />
+ continue;<br />
+ }<br />
+ else if(curItem-&gt;proto == TCP &amp;&amp; protocol != IPPROTO_TCP)<br />
+ {<br />
+ continue;<br />
+ }<br />
+ else if(curItem-&gt;proto == ICMP &amp;&amp; protocol != IPPROTO_ICMP)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> if(curItem-&gt;srcport != 0 &amp;&amp; curItem-&gt;srcport != srcport)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> if(curItem-&gt;destport != 0 &amp;&amp; curItem-&gt;destport != destport)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> policySrcMaskedIp = GetMaskedIP(curItem-&gt;srcip, curItem-&gt;srcnetmask);<br />
+ if(policySrcMaskedIp != 0 &amp;&amp; policySrcMaskedIp != srcip)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> policyDestMaskedIp = GetMaskedIP(curItem-&gt;destip, curItem-&gt;destnetmask);<br />
+ if(policyDestMaskedIp != 0 &amp;&amp; policyDestMaskedIp != destip)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> if(curItem-&gt;action == UNBLOCK)<br />
+ {<br />
+ return NF_ACCEPT;<br />
+ }<br />
+ else if(curItem-&gt;action == BLOCK)<br />
+ {<br />
+ return NF_DROP;<br />
+ }</p>
+<p> }</p>
+<p> return NF_ACCEPT;<br />
+}</p>
+<p>int init_module(void)<br />
+{</p>
+<p>...</p>
+<p>}<br />
+void cleanup_module(void)</p>
+<p>{<br />
+...<br />
+}<br />
+</pre></code>

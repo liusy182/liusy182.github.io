@@ -1,0 +1,238 @@
+---
+layout: post
+title: Running selenium on CEF
+date: 2015-03-24 15:08:35.000000000 +08:00
+type: post
+published: true
+status: publish
+categories: []
+tags:
+- Automation
+- c#
+- CEF
+- chromedriver
+- Chromium Embedded Framework
+- CPP
+- Selenium
+meta:
+  sharing_disabled: '1'
+  _publicize_pending: '1'
+  _rest_api_published: '1'
+  _rest_api_client_id: "-1"
+---
+<p>Selenium is a great tool. It is great for browser automation. But I had quite a bit of struggle figuring out how to tweak it for Chromium Embedded Framework. The thing that disturbed me most was that chromedriver.exe was a black box without much documentations on how it internally works. Say we have a testcase for Chrome:</p>
+<pre><code>
+<p>var service = ChromeDriverService.CreateDefaultService(@&quot;C:\chromedriver&quot;);<br />
+ChromeOptions chromeOptions = new ChromeOptions();<br />
+chromeOptions.AddArgument(&quot;--remote-debugging-port=1234&quot;);<br />
+chromeOptions.BinaryLocation = @&quot;C:\Program Files (x86)\Google\Chrome\Application\chrome.exe&quot;;<br />
+IWebDriver driver = new ChromeDriver(service, chromeOptions);<br />
+driver.Navigate().GoToUrl(&quot;http://www.google.com.com&quot;);<br />
+driver.Quit();</p>
+</pre></code>
+<p>This piece of code will just work fine, provided that chromedriver.exe can be found in c:\chromedriver. However, say we have a CEF page (cef.exe) hosted under a MFC dialog (mfchost.exe), We might tend to write our test in this way:</p>
+<pre><code>
+<p>var service = ChromeDriverService.CreateDefaultService(@&quot;C:\chromedriver&quot;);<br />
+ChromeOptions chromeOptions = new ChromeOptions();<br />
+chromeOptions.AddArgument(&quot;--remote-debugging-port=1234&quot;);<br />
+chromeOptions.BinaryLocation = @&quot;C:\test\mfchost.exe&quot;;</p>
+<p>IWebDriver driver = new ChromeDriver(service, chromeOptions);<br />
+driver.Navigate().GoToUrl(&quot;http://www.google.com.com&quot;);<br />
+driver.Quit();</p>
+</pre></code>
+<p>Unfortunately this won't work. The reason is twofold. First, chromedriver.exe will launch mfchost.exe and treat is as the chrome. This is definitely wrong because mfchost.exe won't have the port configured for communication. Second, chromedriver.exe will start mfchost.exe with flag "--remote-debugging-port=1234". This is again wrong because mfchost.exe has no idea what this flag means because it is not a chromium page at all :(</p>
+<p>It was like a puzzle to me initially, I gauged that there were several things I need to get this fixed. First, we wanted chromedriver.exe to still start mfchost.exe. Second, once mfchost.exe was started, we wanted to find its child CEF process, cef.exe, and let chromedriver.exe communicate with this process instead. Last thing, we need to have a common port for communication.</p>
+<p>The last thing was the easiest to solve, I created an environmental variable CEF_DEBUGGING_PORT that was used by the mfchost.exe while starting cef.exe. Something like:</p>
+<pre><code>
+...<br />
+char* debugPort = getenv(&quot;CEF_DEBUGGING_PORT&quot;);<br />
+ if(!debugPort)<br />
+ {<br />
+ flags += L&quot; --remote-debugging-port=&quot; + CString(debugPort);<br />
+ }<br />
+ base::create(L&quot;cef.exe&quot;,flags);<br />
+...<br />
+</pre></code>
+<p>A piece of good news to me: source code for chromedriver.exe was part of the open source <a href="http://www.chromium.org/">Chromium project</a>. Building chromium wasn't a easy job, it bloated my CPU and RAM so that my PC was unusable for a couple of hours!</p>
+<p>Thanks for a document provided by my colleague, I found out the place where chromedriver.exe launched test application, and inserted the port override right before any preparation work happened:</p>
+<pre><code>
+//chrome_launcher.cc<br />
+Status LaunchDesktopChrome(<br />
+ URLRequestContextGetter* context_getter,<br />
+ uint16 port,<br />
+ scoped_ptr&lt;PortReservation&gt; port_reservation,<br />
+ const SyncWebSocketFactory&amp; socket_factory,<br />
+ const Capabilities&amp; capabilities,<br />
+ ScopedVector&lt;DevToolsEventListener&gt;* devtools_event_listeners,<br />
+ scoped_ptr&lt;Chrome&gt;* chrome) {<br />
+ base::CommandLine command(base::CommandLine::NO_PROGRAM);<br />
+ base::ScopedTempDir user_data_dir;<br />
+ base::ScopedTempDir extension_dir;<br />
+ std::vector&lt;std::string&gt; extension_bg_pages;</p>
+<p>// override the original port value if the env is set<br />
+ char* userDefinedPort = getenv(&quot;CEF_DEBUGGING_PORT&quot;);<br />
+ bool bDebugCEF = userDefinedPort != NULL;<br />
+ if (bDebugCEF)<br />
+ {<br />
+ port = atoi(userDefinedPort);<br />
+ }</p>
+<p>Status status = PrepareCommandLine(port,<br />
+ capabilities,<br />
+ &amp;command,<br />
+ &amp;user_data_dir,<br />
+ &amp;extension_dir,<br />
+ &amp;extension_bg_pages);<br />
+ if (status.IsError())<br />
+ return status;</p>
+<p>...</p>
+</pre></code>
+<p>The next change to make this this method is to launch host mfchost.exe, and then find out the child process cef.exe</p>
+<pre><code>
+//chrome_launcher.cc<br />
+...<br />
+#if defined(OS_WIN)<br />
+ std::string command_string = base::WideToUTF8(command.GetCommandLineString());<br />
+#else<br />
+ std::string command_string = command.GetCommandLineString();<br />
+#endif<br />
+ VLOG(0) &lt;&lt; &quot;Launching chrome: &quot; &lt;&lt; command_string;</p>
+<p> base::Process process;<br />
+ base::Process hostProcess;<br />
+ // newly added logic<br />
+ if (bDebugCEF)<br />
+ {<br />
+ hostProcess = base::LaunchProcess(base::CommandLine(capabilities.binary), base::LaunchOptions());<br />
+ base::ProcessHandle procHandle = WaitForProcessHandle(&amp;hostProcess, L&quot;cef.exe&quot;);<br />
+ process = base::Process(procHandle);<br />
+ }<br />
+ // keep the original logic in chromedriver.exe<br />
+ else<br />
+ {<br />
+ process = base::LaunchProcess(command, options);<br />
+ }<br />
+...<br />
+</pre></code>
+<p>Basically, I have added a hostProcess to hold instance mfchost.exe, and implemented a method called WaitForProcessHandle to find out child process' handle given the host process and child process's name. WaitForProcessHandle runs in a loop with a timeout of 60 seconds to continuously check for valid child process until one valid entry is found. It looks something like below:</p>
+<pre><code>
+<p>HANDLE WaitForProcessHandle(const base::Process* hostProcessPtr, const wchar_t* procName)<br />
+{<br />
+ base::TimeTicks deadline =<br />
+ base::TimeTicks::Now() + base::TimeDelta::FromSeconds(60);</p>
+<p> HANDLE hChildProcHandle = INVALID_HANDLE_VALUE;<br />
+ PROCESSENTRY32 pe32;<br />
+ pe32.dwSize = sizeof(PROCESSENTRY32);</p>
+<p> while (base::TimeTicks::Now() &lt; deadline)<br />
+ {<br />
+ // give some time for child process gets started<br />
+ base::PlatformThread::Sleep(base::TimeDelta::FromMicroseconds(500));</p>
+<p> HANDLE hProcessSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);<br />
+ if (hProcessSnap == INVALID_HANDLE_VALUE)<br />
+ {<br />
+ continue;<br />
+ }</p>
+<p> if (!Process32First(hProcessSnap, &amp;pe32))<br />
+ {<br />
+ CloseHandle(hProcessSnap);<br />
+ continue;<br />
+ }</p>
+<p> typedef std::pair&lt;int, int&gt; processIDPair;<br />
+ std::vector&lt;processIDPair&gt; processIDvec;<br />
+ std::vector&lt;int&gt; processIDs;<br />
+ do<br />
+ {<br />
+ if (_wcsicmp(procName, pe32.szExeFile) == 0)<br />
+ {<br />
+ int processID = (int)pe32.th32ProcessID;<br />
+ processIDs.push_back(processID);<br />
+ int parentProcessID = (int)pe32.th32ParentProcessID;<br />
+ processIDvec.push_back(processIDPair(processID, parentProcessID));<br />
+ }</p>
+<p> } while (Process32Next(hProcessSnap, &amp;pe32));<br />
+ CloseHandle(hProcessSnap);</p>
+<p> DWORD chromeProcessToGet = 0;<br />
+ for (size_t i = 0; i &lt; processIDvec.size(); i++)<br />
+ {<br />
+ int processID = processIDvec[i].first;<br />
+ int parentProcessID = processIDvec[i].second;<br />
+ if (std::find(processIDs.begin(), processIDs.end(), parentProcessID) == processIDs.end() &amp;&amp; parentProcessID == (int)hostProcessPtr-&gt;Pid())<br />
+ {<br />
+ chromeProcessToGet = (DWORD)processID;<br />
+ break;<br />
+ }<br />
+ }</p>
+<p> hChildProcHandle = OpenProcess(PROCESS_QUERY_INFORMATION |<br />
+ PROCESS_VM_OPERATION | PROCESS_VM_READ |<br />
+ PROCESS_VM_WRITE, FALSE, chromeProcessToGet);<br />
+ if (hChildProcHandle != INVALID_HANDLE_VALUE &amp;&amp; hChildProcHandle != NULL)<br />
+ break;<br />
+ }</p>
+<p> return hChildProcHandle;<br />
+}</p>
+</pre></code>
+<p>Last but not least piece of change to make is to create a new ctor in class ChromeDesktopImpl, and let it keep track of hostProcess so that cefhost.exe gets properly terminated when chromedriver.exe exits.</p>
+<pre><code>
+<p>//chrome_desktop.Impl.cc</p>
+<p>...</p>
+<p>//chrome_desktop.Impl.h needs to be updated with this new ctor as well<br />
+ChromeDesktopImpl::ChromeDesktopImpl(<br />
+ scoped_ptr&lt;DevToolsHttpClient&gt; http_client,<br />
+ scoped_ptr&lt;DevToolsClient&gt; websocket_client,<br />
+ ScopedVector&lt;DevToolsEventListener&gt;&amp; devtools_event_listeners,<br />
+ scoped_ptr&lt;PortReservation&gt; port_reservation,<br />
+ base::Process process,<br />
+ base::Process hostProcess,<br />
+ const base::CommandLine&amp; command,<br />
+ base::ScopedTempDir* user_data_dir,<br />
+ base::ScopedTempDir* extension_dir)<br />
+ : ChromeImpl(http_client.Pass(),<br />
+ websocket_client.Pass(),<br />
+ devtools_event_listeners,<br />
+ port_reservation.Pass()),<br />
+ process_(process.Pass()),<br />
+ hostProcess_(hostProcess.Pass()),<br />
+ command_(command) {<br />
+ if (user_data_dir-&gt;IsValid())<br />
+ CHECK(user_data_dir_.Set(user_data_dir-&gt;Take()));<br />
+ if (extension_dir-&gt;IsValid())<br />
+ CHECK(extension_dir_.Set(extension_dir-&gt;Take()));</p>
+<p>...</p>
+<p>// terminate the hostProcess_ if it presents<br />
+Status ChromeDesktopImpl::QuitImpl() {<br />
+ // If the Chrome session uses a custom user data directory, try sending a<br />
+ // SIGTERM signal before SIGKILL, so that Chrome has a chance to write<br />
+ // everything back out to the user data directory and exit cleanly.If<br />
+ // we're using a temporary user data directory, we're going to delete<br />
+ // the temporary directory anyway, so just send SIGKILL immediately.<br />
+ if (!KillProcess(process_, !user_data_dir_.IsValid()))<br />
+ return Status(kUnknownError, &quot;cannot kill Chrome&quot;);<br />
+ if (hostProcess_.IsValid() &amp;&amp; !KillProcess(hostProcess_, true))<br />
+ return Status(kUnknownError, &quot;cannot kill host Process!&quot;);<br />
+ return Status(kOk);<br />
+}</p>
+<p>...</p>
+</pre></code>
+<p>Corresponding entry point for this class needs to be updated to use this ctor in chrome_launch.cc</p>
+<pre><code>
+<p>...</p>
+<p>scoped_ptr&lt;ChromeDesktopImpl&gt; chrome_desktop(<br />
+ new ChromeDesktopImpl(devtools_http_client.Pass(),<br />
+ devtools_websocket_client.Pass(),<br />
+ *devtools_event_listeners,<br />
+ port_reservation.Pass(),<br />
+ process.Pass(),<br />
+ hostProcess.Pass(),<br />
+ command,<br />
+ &amp;user_data_dir,<br />
+ &amp;extension_dir));</p>
+<p>...</p>
+</pre></code>
+<p>Finally all is set! I built the project to get a brand new chromedriver.exe. Now, I can write test for CEF just like any test for chrome, except that we need to give CEF_DEBUGGING_PORT !</p>
+<pre><code>
+<p>var service = ChromeDriverService.CreateDefaultService(@&quot;C:\chromedriver&quot;);<br />
+ChromeOptions chromeOptions = new ChromeOptions();<br />
+chromeOptions.BinaryLocation = @&quot;C:\test\cefhost.exe&quot;;</p>
+<p>IWebDriver driver = new ChromeDriver(service, chromeOptions);<br />
+driver.Navigate().GoToUrl(&quot;http://www.google.com.com&quot;);<br />
+driver.Quit();</p>
+</pre></code>
+<p>(Further improvements: child process name "cef.exe" is currently hard-coded to chrome_launcher.cc. We can make it customizable by passing it as a flag to cefhost.exe in Selenium test case, and then parse it from "capabilities" in chrome_launcher.)</p>

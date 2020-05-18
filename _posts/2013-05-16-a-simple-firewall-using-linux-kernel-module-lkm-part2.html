@@ -1,0 +1,121 @@
+---
+layout: post
+title: A simple firewall using Linux Kernel Module (LKM), part2
+date: 2013-05-16 14:13:23.000000000 +08:00
+type: post
+published: true
+status: publish
+categories: []
+tags:
+- c#
+- Linux
+meta:
+  _edit_last: '37851649'
+  _publicize_pending: '1'
+---
+<p>In the <a href="http://liusy182.wordpress.com/2013/05/14/a-simple-firewall-using-linux-kernel-module%EF%BC%88lkm-part1/" target="_blank">previous post</a> I have defined several customized structs to store data. The next immediate to-do item is the ability to parse user input.<a href="http://www.gnu.org/software/libc/manual/html_node/Getopt-Long-Options.html" target="_blank"> getopt_long()</a> is a powerful tool to parse user input. To use this function, we need to include &lt;getopt.h&gt;. Here is the code snippet:</p>
+<pre><code>
+while (1)<br />
+ {<br />
+ static struct option long_options[] =<br />
+ {<br />
+ { &quot;in&quot;, no_argument, 0, 'a' },<br />
+ { &quot;out&quot;, no_argument, 0, 'b' },<br />
+ { &quot;print&quot;, no_argument, 0, 'c' },<br />
+ { &quot;delete&quot;, required_argument, 0, 'd' },<br />
+ { &quot;srcip&quot;, required_argument, 0, 'e' },<br />
+ { &quot;srcport&quot;, required_argument, 0, 'f' },<br />
+ { &quot;srcnetmask&quot;, required_argument, 0, 'g' },<br />
+ { &quot;destip&quot;, required_argument, 0, 'h' },<br />
+ { &quot;destport&quot;, required_argument, 0, 'i' },<br />
+ { &quot;destnetmask&quot;, required_argument, 0, 'j' },<br />
+ { &quot;action&quot;, required_argument, 0, 'k' },<br />
+ { &quot;proto&quot;, required_argument, 0, 'l' },<br />
+ {0, 0, 0, 0}<br />
+ };<br />
+ int option_index = 0;<br />
+ const char* const short_options = &quot;abcd:e:f:g:h:i:j:k:l:&quot;;<br />
+ c = getopt_long(argc, argv, short_options, long_options, &amp;option_index);<br />
+ if (c == -1)<br />
+ break;</p>
+<p> switch (c)<br />
+ {<br />
+ case 'a': // --in<br />
+ policyCache.operation = IN;<br />
+ break;<br />
+ case 'b': // --out<br />
+ policyCache.operation = OUT;<br />
+ break;<br />
+ case 'c': // --print<br />
+ policyCache.operation = PRINT;<br />
+ break;<br />
+ case 'd': // --delete<br />
+ policyCache.operation = DEL;<br />
+ policyCache.index = atoi(optarg);<br />
+ break;<br />
+ case 'e': //srcip<br />
+ policyCache.srcip = ConvertIP(optarg);<br />
+ break;<br />
+ case 'f': //srcport<br />
+ policyCache.srcport = atoi(optarg);<br />
+ break;<br />
+ case 'g': //srcnetmask<br />
+ policyCache.srcnetmask = ConvertIP(optarg);<br />
+ break;<br />
+ case 'h': //destip<br />
+ policyCache.destip = ConvertIP(optarg);<br />
+ break;<br />
+ case 'i': //destport<br />
+ policyCache.destport = atoi(optarg);<br />
+ break;<br />
+ case 'j': //destnetmask<br />
+ policyCache.destnetmask = ConvertIP(optarg);<br />
+ break;<br />
+ case 'k': //action<br />
+ if(strcmp (&quot;BLOCK&quot;, optarg) == 0)<br />
+ {<br />
+ policyCache.action = BLOCK;<br />
+ }<br />
+ else if(strcmp (&quot;UNBLOCK&quot;, optarg)==0)<br />
+ {<br />
+ policyCache.action = UNBLOCK;<br />
+ }<br />
+ break;<br />
+ case 'l': //proto<br />
+ if(strcmp (&quot;ALL&quot;, optarg) == 0)<br />
+ {<br />
+ policyCache.proto = ALL;<br />
+ }<br />
+ else if(strcmp (&quot;UDP&quot;, optarg)==0)<br />
+ {<br />
+ policyCache.proto = UDP;<br />
+ }<br />
+ else if(strcmp (&quot;TCP&quot;, optarg)==0)<br />
+ {<br />
+ policyCache.proto = TCP;<br />
+ }<br />
+ else if(strcmp (&quot;ICMP&quot;, optarg)==0)<br />
+ {<br />
+ policyCache.proto = ICMP;<br />
+ }<br />
+ break;<br />
+ default:<br />
+ break;<br />
+ } // end of switch<br />
+ } //end of while<br />
+ <br />
+</pre></code>
+<p>Notice that an array of struct option is defined to hold all expected long options. and a char* is defined to hold all expected short options. getopt_long() will return parsed options one by one and finally returns a value -1 when there is no more option to return. Hence, we can use a while loop to retrieve option values and break out when -1 is met.</p>
+<p>When policyCache<b>.</b>operation equals to IN, OUT or DEL,we need write to LKM with correspoinding operations. When policyCache<b>.</b>operation equals to PRINT, we need to read from LKM to retrieve all policies and print them out in user space. this is done through the following 2 calls to WriteToProc() and PrintPolicies() respectively:</p>
+<pre><code>
+if (policyCache.operation == IN || policyCache.operation == OUT || policyCache.operation == DEL)<br />
+ {<br />
+ WriteToProc(&amp;policyCache);<br />
+ }<br />
+ else if (policyCache.operation == PRINT)<br />
+ {<br />
+ PrintPolicies();<br />
+ }<br />
+ 
+</pre></code>
+<p>In the next post, I will move on the discuss how to use "/proc" file system to interact with LKM from user space.</p>
