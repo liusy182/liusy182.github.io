@@ -1,0 +1,83 @@
+---
+layout: post
+title: Jest - How do you debug it?
+date: 2015-03-12 14:33:41.000000000 +08:00
+type: post
+published: true
+status: publish
+categories: []
+tags:
+- javascript
+- Jest
+- Node
+meta:
+  _wpas_skip_facebook: '1'
+  sharing_disabled: '1'
+  _wpas_skip_google_plus: '1'
+  _wpas_skip_twitter: '1'
+  _wpas_skip_linkedin: '1'
+  _wpas_skip_tumblr: '1'
+  _wpas_skip_path: '1'
+  _publicize_pending: '1'
+  _rest_api_published: '1'
+  _rest_api_client_id: "-1"
+---
+<p>Facebook's Jest framework is very powerful with its automatic mocking which I personally like it a lot. However, it throws cryptic call stacks quite often when it runs into issue. When I searched online trying to figure out how to debug a Jest test, I had a hard time finding useful information. Anyway, it is still a framework that just recently came out.</p>
+<p>Jest uses virtual DOM to run tests. This is different from Karma + Jasmine which leverage browsers to run tests. This causes one of the biggest drawbacks in Jest in my opinion: we cannot use debugging tools that come with modern browsers to debug Jest tests. Instead, we need to rely on the debugger that comes with Node / V8 engine. <a href="https://nodejs.org/api/debugger.html">Node's default debugger</a> is entirely command-based which is similar to GDB - I am never a fan of command line debugger, but it get things done.</p>
+<h2>First try</h2>
+<p>To debug a Jest test, say "myView-test.js", we need to run node with the command below:</p>
+<pre><code>
+<p>node debug --harmony .\node_modules\jest-cli\bin\jest.js --runInBand myView-test.js</p>
+</pre></code>
+<p>Let me explain what we are doing here:</p>
+<p>1. "node debug" will start the node debugger. "debug" calls a wrapper for V8 engine's debugger which can be started with "node --debug". This wrapper provides a set of commands we can use to step in / out / navigate through code which is missing in V8's "node --debug". (I agree that they look very similar)</p>
+<p>2. "–hamony" flag is required for Jest to run properly. More information on harmony can be found <a href="http://stackoverflow.com/questions/13351965/what-does-node-harmony-do">here</a>.</p>
+<p>3. ".\node_modules\jest-cli\bin\jest.js" is the entry point for Jest. This file is called when we use call "Jest" in "\node_modules\.bin"</p>
+<p>4. "–runInBand" tells Jest to run all tests in the current process instead of spawning child processes. The default behavior for Jest is that it will spawn multiple processes to run tests concurrently. Excerpt from description of this option in source code (.\node_modules\jest-cli\bin\jest.js):</p>
+<pre><code>
+<p>'Run all tests serially in the current process (rather than creating ' +<br />
+'a worker pool of child processes that run tests). This is sometimes ' +<br />
+'useful for debugging, but such use cases are pretty rare.'</p>
+</pre></code>
+<p>5. "myView-test.js" is the test file that we intend to debug. Partial path will work probably because Jest has converted into a RegEx.</p>
+<p>Once the debugger is started, we will see debugger paused at the first line of jest.cs. We can use Node Debugger's supported APIs to step through the code. Or we can put a breakpoint into our test</p>
+<pre><code>
+<p>debug&gt; sb('C:\\example\\reactApp\\__tests__\\myView-test.js', 1)</p>
+</pre></code>
+<p>This will insert a breakpoint at the first line of "myView-test.js". We can key in "c" or "cont" to run until the breakpoint.</p>
+<p>Node debugger provided a set of useful commands</p>
+<pre><code>
+cont, c - Continue execution<br />
+next, n - Step next<br />
+step, s - Step in<br />
+out, o - Step out<br />
+pause - Pause running code (like pause button in Developer Tools)</p>
+<p>setBreakpoint(), sb() - Set breakpoint on current line<br />
+setBreakpoint(line), sb(line) - Set breakpoint on specific line<br />
+setBreakpoint('fn()'), sb(...) - Set breakpoint on a first statement in functions body<br />
+setBreakpoint('script.js', 1), sb(...) - Set breakpoint on first line of script.js<br />
+clearBreakpoint, cb(...) - Clear breakpoint</p>
+<p>backtrace, bt - Print backtrace of current execution frame<br />
+list(5) - List scripts source code with 5 line context (5 lines before and after)<br />
+watch(expr) - Add expression to watch list<br />
+unwatch(expr) - Remove expression from watch list<br />
+watchers - List all watchers and their values (automatically listed on each breakpoint)<br />
+repl - Open debugger's repl for evaluation in debugging script's context</p>
+<p>run - Run script (automatically runs on debugger's start)<br />
+restart - Restart script<br />
+kill - Kill script<br />
+</pre></code>
+<h2>Using WebStorm 9</h2>
+<p>Since I am never a fan of command-based debugger, I got lost very easily with Node's debugger. I started to think of ways to integrate Jest debugging into <a href="https://www.jetbrains.com/webstorm/">Webstorm 9</a> which is the powerful IDE I am using.</p>
+<p>Right from the start, WebStorm poses me with 2 issues:</p>
+<p>1. there is no way to use "node debug" directly.</p>
+<p>2. Webstorm has no direct support for Jest (it has support for Karma and Mocha though...).</p>
+<p>I finally figured it out that we can set up a debug configuration for Node, but use it for Jest instead. WebStorm automatically appends V8's flag "--debug" when it tries to debug Node. We just need to properly configure it so that the JS we want to debug is correctly fed in.</p>
+<p>Here are the steps:</p>
+<p>1. Go to menu "Run -  Edit Configurations...".</p>
+<p>2. Add a new "Node.js" configuration and fill in fields as indicated below:</p>
+<p><img class="alignnone  wp-image-246" src="{{ site.baseurl }}/assets/run-config.png?w=300" alt="run-config" width="614" height="323" /></p>
+<p>3. Save and close the dialog. Set any breakpoint in Text Editor.</p>
+<p><a href='{{ site.url }}/assets/bp.png'><img class="alignnone  wp-image-248" src='{{ site.baseurl }}/assets/bp.png?w=300' alt="bp" width="616" height="275" /></a></p>
+<p>3.  Go to menu "Run - Debug..." and choose the configuration we just saved. This will start a debugging shell to run the tests. It will eventually pause at the breakpoint we put.</p>
+<p>4. Now, we can use Webstorm's powerful debugger (it shows up at the bottom of the IDE) to debug our Jest tests.</p>

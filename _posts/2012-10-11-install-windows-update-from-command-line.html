@@ -1,0 +1,140 @@
+---
+layout: post
+title: Installing windows update from command line
+date: 2012-10-11 14:31:21.000000000 +08:00
+type: post
+published: true
+status: publish
+categories: []
+tags:
+- programming
+- vbscript
+- windows update
+meta:
+  _edit_last: '37851649'
+  _publicize_pending: '1'
+---
+<p>One of the bottleneck I have faced when trying to automate the process of starting UI automation is to find a proper way to install windows update from command line. <a href="http://www.wuinstall.com/">WuInstall</a> is one of the options. But some limitations (such as dependency on a third party application and its stability) refrained me from using it. Now I have finally found a way to use a VBScript<a href="http://msdn.microsoft.com/en-us/library/windows/desktop/aa386515(v=vs.85).aspx"> </a>to achieve my purpose.</p>
+<p>Using the <a href="http://msdn.microsoft.com/en-us/library/windows/desktop/aa386515(v=vs.85).aspx">sample code</a> give by Microsoft, I properly commented out some parts so that user input is not required during script execution. An additional query to search for update type "Driver" is added so that driver updates can be installed. This is very important in the context of my team as the application that I am testing is graphical intensive. Only by installing the latest graphic card driver can we avoid test case failures caused by an outdated driver.</p>
+<pre><code>
+
+Set updateSession = CreateObject("Microsoft.Update.Session")
+updateSession.ClientApplicationID = "MSDN Sample Script"
+
+Set updateSearcher = updateSession.CreateUpdateSearcher()
+
+WScript.Echo "Searching for updates..." &amp; vbCRLF
+
+Set searchResult = _
+updateSearcher.Search("(IsInstalled=0 and Type='Software' and IsHidden=0) or (IsInstalled=0 and Type='Driver' and IsHidden=0)")
+
+WScript.Echo "List of applicable items on the machine:"
+
+For I = 0 To searchResult.Updates.Count-1
+    Set update = searchResult.Updates.Item(I)
+    WScript.Echo I + 1 &amp; "&gt; " &amp; update.Title
+Next
+
+If searchResult.Updates.Count = 0 Then
+    WScript.Echo "There are no applicable updates."
+    WScript.Quit
+End If
+
+WScript.Echo vbCRLF &amp; "Creating collection of updates to download:"
+
+Set updatesToDownload = CreateObject("Microsoft.Update.UpdateColl")
+
+For I = 0 to searchResult.Updates.Count-1
+    Set update = searchResult.Updates.Item(I)
+    addThisUpdate = false
+    If update.InstallationBehavior.CanRequestUserInput = true Then
+        WScript.Echo I + 1 &amp; "&gt; skipping: " &amp; update.Title &amp; _
+        " because it requires user input"
+    Else
+        If update.EulaAccepted = false Then
+            'WScript.Echo I + 1 &amp; "&gt; note: " &amp; update.Title &amp; _
+            '" has a license agreement that must be accepted:"
+            'WScript.Echo update.EulaText
+            'WScript.Echo "Do you accept this license agreement? (Y/N)"
+            'strInput = WScript.StdIn.Readline
+            'WScript.Echo 
+            'If (strInput = "Y" or strInput = "y") Then
+                update.AcceptEula()
+                addThisUpdate = true
+            'Else
+            '    WScript.Echo I + 1 &amp; "&gt; skipping: " &amp; update.Title &amp; _
+            '    " because the license agreement was declined"
+            'End If
+        Else
+            addThisUpdate = true
+        End If
+    End If
+    If addThisUpdate = true Then
+        WScript.Echo I + 1 &amp; "&gt; adding: " &amp; update.Title 
+        updatesToDownload.Add(update)
+    End If
+Next
+
+If updatesToDownload.Count = 0 Then
+    WScript.Echo "All applicable updates were skipped."
+    WScript.Quit
+End If
+
+WScript.Echo vbCRLF &amp; "Downloading updates..."
+
+Set downloader = updateSession.CreateUpdateDownloader() 
+downloader.Updates = updatesToDownload
+downloader.Download()
+
+Set updatesToInstall = CreateObject("Microsoft.Update.UpdateColl")
+
+rebootMayBeRequired = false
+
+WScript.Echo vbCRLF &amp; "Successfully downloaded updates:"
+
+For I = 0 To searchResult.Updates.Count-1
+    set update = searchResult.Updates.Item(I)
+    If update.IsDownloaded = true Then
+        WScript.Echo I + 1 &amp; "&gt; " &amp; update.Title 
+        updatesToInstall.Add(update)	
+        If update.InstallationBehavior.RebootBehavior &gt; 0 Then
+            rebootMayBeRequired = true
+        End If
+    End If
+Next
+
+If updatesToInstall.Count = 0 Then
+    WScript.Echo "No updates were successfully downloaded."
+    WScript.Quit
+End If
+
+If rebootMayBeRequired = true Then
+    WScript.Echo vbCRLF &amp; "These updates may require a reboot."
+End If
+
+'WScript.Echo  vbCRLF &amp; "Would you like to install updates now? (Y/N)"
+'strInput = WScript.StdIn.Readline
+'WScript.Echo 
+
+'If (strInput = "Y" or strInput = "y") Then
+    WScript.Echo "Installing updates..."
+    Set installer = updateSession.CreateUpdateInstaller()
+    installer.Updates = updatesToInstall
+    Set installationResult = installer.Install()
+
+    'Output results of install
+    WScript.Echo "Installation Result: " &amp; _
+    installationResult.ResultCode 
+    WScript.Echo "Reboot Required: " &amp; _ 
+    installationResult.RebootRequired &amp; vbCRLF 
+    WScript.Echo "Listing of updates installed " &amp; _
+    "and individual installation results:" 
+
+    For I = 0 to updatesToInstall.Count - 1
+        WScript.Echo I + 1 &amp; "&gt; " &amp; _
+        updatesToInstall.Item(i).Title &amp; _
+        ": " &amp; installationResult.GetUpdateResult(i).ResultCode 		
+    Next
+'End If
+
+</code></pre>

@@ -1,0 +1,109 @@
+---
+layout: post
+title: A simple firewall using Linux Kernel Module (LKM), part3
+date: 2013-05-19 02:19:38.000000000 +08:00
+type: post
+published: true
+status: publish
+categories: []
+tags:
+- c#
+- Linux
+meta:
+  _publicize_pending: '1'
+  _edit_last: '37851649'
+---
+<p>As previous posts have mentioned, I used "/proc" file system to communicate with LKM during runtime. Using "/proc" is very simple and straightforward  I just need to define a file under "/proc" that serves as a inter-mediator between LKM and user space. From user space, I wrote new policies to LKM through a new proc file "firewall_sy"</p>
+<pre><code>
+void WriteToProc(struct PolicyCache *polityPtr)<br />
+{<br />
+ printf(&quot;in WriteToProc()..\n&quot;);<br />
+ FILE *pFile = fopen(&quot;/proc/firewall_sy&quot;, &quot;wb&quot;);<br />
+ if (pFile == NULL)<br />
+ {<br />
+ printf(&quot;open /proc/firewall_sy for writing failed..\n&quot;);<br />
+ }<br />
+ else<br />
+ {<br />
+ if(fwrite(polityPtr, sizeof(struct PolicyCache), 1, pFile) != 1)<br />
+ {<br />
+ printf(&quot;WriteToProc(): fwrite failed..\n&quot;);<br />
+ }<br />
+ fclose(pFile);<br />
+ }<br />
+}</p>
+</pre></code>
+<p>One beauty of C language comparing to high-level languages like c# is that it can write binaries of a data directly to files by passing in a pointer. Directly reading a struct is in a similar way, except that memory to hold struct needs to be manually allocated at each read.</p>
+<pre><code>
+void PrintPolicies()<br />
+{<br />
+ printf(&quot;in PrintPolicies()..\n&quot;);<br />
+ FILE *pFile = fopen(&quot;/proc/firewall_sy&quot;, &quot;rb&quot;);<br />
+ if (pFile == NULL)<br />
+ {<br />
+ printf(&quot;open /proc/firewall_sy for reading failed..\n&quot;);<br />
+ }<br />
+ else<br />
+ {<br />
+ struct PolicyCache* item;<br />
+ int i = 1;<br />
+ do<br />
+ {<br />
+ item = (struct PolicyCache*) malloc(sizeof(struct PolicyCache));<br />
+ if(fread(item, sizeof(struct PolicyCache), 1, pFile) != 1)<br />
+ {<br />
+ printf(&quot;PrintPolicies(): read to the end of file..\n&quot;);<br />
+ break;<br />
+ }<br />
+ if(item != NULL &amp;&amp; (item-&gt;operation == IN || item-&gt;operation == OUT))<br />
+ {<br />
+ printf(&quot;================Policy %d================\n&quot;, i);<br />
+ char* inOut;<br />
+ if(item-&gt;operation == IN)<br />
+ {<br />
+ printf(&quot;in/out: IN\n&quot;);<br />
+ }<br />
+ else if(item-&gt;operation == OUT)<br />
+ {<br />
+ printf(&quot;in/out: OUT\n&quot;);<br />
+ }</p>
+<p> printf(&quot;srcip: %hhu.%hhu.%hhu.%hhu\n&quot;, (item-&gt;srcip).seg4, (item-&gt;srcip).seg3, (item-&gt;srcip).seg2, (item-&gt;srcip).seg1);<br />
+ printf(&quot;srcport: %u\n&quot;, item-&gt;srcport);<br />
+ printf(&quot;srcnetmask: %hhu.%hhu.%hhu.%hhu\n&quot;, (item-&gt;srcnetmask).seg4, (item-&gt;srcnetmask).seg3, (item-&gt;srcnetmask).seg2, (item-&gt;srcnetmask).seg1);</p>
+<p> printf(&quot;destip: %hhu.%hhu.%hhu.%hhu\n&quot;, (item-&gt;destip).seg4, (item-&gt;destip).seg3, (item-&gt;destip).seg2, (item-&gt;destip).seg1);<br />
+ printf(&quot;destport: %u\n&quot;, item-&gt;destport);<br />
+ printf(&quot;destnetmask: %hhu.%hhu.%hhu.%hhu\n&quot;, (item-&gt;destnetmask).seg4, (item-&gt;destnetmask).seg3, (item-&gt;destnetmask).seg2, (item-&gt;destnetmask).seg1);</p>
+<p> if(item-&gt;proto == ALL)<br />
+ {<br />
+ printf(&quot;protocol: ALL\n&quot;);<br />
+ }<br />
+ else if(item-&gt;proto == UDP)<br />
+ {<br />
+ printf(&quot;protocol: UDP\n&quot;);<br />
+ }<br />
+ else if(item-&gt;proto == TCP)<br />
+ {<br />
+ printf(&quot;protocol: TCP\n&quot;);<br />
+ }<br />
+ else if(item-&gt;proto == ICMP)<br />
+ {<br />
+ printf(&quot;protocol: ICMP\n&quot;);<br />
+ }</p>
+<p> if(item-&gt;action == BLOCK)<br />
+ {<br />
+ printf(&quot;action: BLOCK\n&quot;);<br />
+ }<br />
+ else if(item-&gt;action == UNBLOCK)<br />
+ {<br />
+ printf(&quot;action: UNBLOCK\n&quot;);<br />
+ }<br />
+ printf(&quot;============End of Policy %d============\n&quot;, i);<br />
+ }<br />
+ i++;<br />
+ } while(item-&gt;next != NULL);<br />
+ fclose(pFile);<br />
+ }<br />
+}<br />
+
+</pre></code>
+<p>In the next post, I will show how to access the "/proc/firewall_sy" file created from LKM by using standard APIs provided.</p>
