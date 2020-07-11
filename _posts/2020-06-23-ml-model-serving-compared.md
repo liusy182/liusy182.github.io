@@ -88,6 +88,16 @@ KubeFlow can be configured to handle auto-scaling, deployment other DevOps activ
 - Cannot be used as a independent framework outside of Kubernetes.
 - Relatively steep learning curve.
 
+### Seldon core
+
+[https://www.seldon.io/tech/products/core/](https://www.seldon.io/tech/products/core/)
+
+Seldon core is another tool built on top of Kubernetes. Seldon core prepackages other 3rd party model servers like TensorFlow Serving and MLflow server in order to bring them into the platform. Seldon core itself does not provide any in-house model server. Seldon core serving can be used with KubeFlow and there seems to be a feature convergence with KFServing in the future.
+
+**Platform dependency**: Kubernetes.
+
+**Focus**: The entire ML lifecycle.
+
 ### Cortex
 
 [https://www.cortex.dev/](https://www.cortex.dev/)
@@ -121,13 +131,3 @@ MLFlow is another frameworks that manages the whole lifecycle of machine learnin
 **Concerns**:
 
 - Models are wrapped by ML custom classes. Unclear on its extensibility and debugging support.
-
-### Seldon core
-
-[https://www.seldon.io/tech/products/core/](https://www.seldon.io/tech/products/core/)
-
-Seldon core is another tool built on top of Kubernetes. Seldon core prepackages other 3rd party model servers like TensorFlow Serving and MLflow server in order to bring them into the platform. Seldon core itself does not provide any in-house model server. Seldon core serving can be used with KubeFlow.
-
-**Platform dependency**: Kubernetes.
-
-**Focus**: The entire ML lifecycle.
