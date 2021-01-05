@@ -8,7 +8,7 @@ tags:
 
 # Requirements
 
-## Functional Requirements
+## 1. Functional Requirements
 
 1. Account signup with phone verification.
 
@@ -28,7 +28,7 @@ tags:
 
 7. Analytics & monitoring
 
-## Non-functional Requirements
+## 2. Non-functional Requirements
 
 1. Highly available.
 
@@ -79,13 +79,13 @@ tags:
 
 ```
 
-## Gateway service
+## 1. Gateway service
 
 The main responsibility of the gateway service is to act as a middleman between
 the app client and backend services. It also does authentication. For example, it 
 reads the `user_token`, talks to the profile service to authenticate the request.
 
-## Profile service 
+## 2. Profile service 
 
 Stores user information & user search preferences. The table is sharded by user id.
 
@@ -121,7 +121,7 @@ We can also adopt a hyprid approach. For example, for images smaller than a cert
 size, we store it as a blob storage in the DB. For images that are bigger, we store
 them into a object storage.
 
-## Swipe service
+## 3. Swipe service
 
 A bad design is to call the swipe API each time a user swipes left or right. This 
 incurs unnecessary load to the service. A better design is to accumulate the swipes 
@@ -153,7 +153,7 @@ Once both users liked each other, the swipe service informs the chat service
 that both users can now chat with each other, and also sends push notifications
 to both users.
 
-## Recommendation service
+## 4. Recommendation service
 
 The recommendation service takes user information from profile service, and stores
 it in its own data store in a [geo-sharded](https://s2geometry.io/) fashion.
@@ -166,7 +166,7 @@ Soft preferences
 - recommendation based on prior swipes
 - the more active a user is, the more likely it is shown to others.
 
-### How do we improve latency?
+**How do we improve latency?**
 
 One solution is to pre-calculate a set of results and populate that into a cache.
 When a user requests for the cached result, it triggers the service to calculate a
@@ -178,7 +178,7 @@ most recently used: the most recently displayed profile should be removed from t
 cache, or be moved to the tail. In this way, new profiles are always prioritized to
 be displayed to the user first.
 
-## Chat service
+## 5. Chat service
 
 Protocols like XMPP enables 2 clients talk to each other efficiently. Typically
 in a modern web browser setting, this is implemented as a Websocket connection to
