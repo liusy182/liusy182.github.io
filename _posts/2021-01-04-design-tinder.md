@@ -131,9 +131,9 @@ once the client has accumulated enough swipes.
 Table schema:
 - user_id_1 + user_id+2 : PK, the application can make sure the smaller id always precedes
     with the bigger id.
-- user_id_1_liked: enum - like | dislike | unknown
+- user_id_1_liked: enum - like, dislike, unknown
 - use_id_1_ts: ts of the user_id_1's action
-- user_id_2_liked: enum - like | dislike | unknown
+- user_id_2_liked: enum - like, dislike, unknown
 - use_id_2_ts: ts of the user_id_2's action
 
 We design `user_id_1_liked` as a enum instead of a boolean so that we can keep 

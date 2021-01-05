@@ -3,7 +3,6 @@ layout: page
 title: About
 permalink: /about/
 ---
+This is a private site. I use it to keep my personal notes. For code, I use
+[github])(https://github.com/liusy182).
 
-I probably write more in code than English. Please visit my [github](https://github.com/liusy182).
-
-If you have some interesting stuff to collaborate, please email `liusy182 (at) gmail (dot) com`.
