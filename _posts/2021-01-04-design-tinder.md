@@ -85,6 +85,9 @@ The main responsibility of the gateway service is to act as a middleman between
 the app client and backend services. It also does authentication. For example, it 
 reads the `user_token`, talks to the profile service to authenticate the request.
 
+Other usual responsibilities of a gate service are SSL termination, rate limiting,
+request routing and response caching.
+
 ## 2. Profile service 
 
 Stores user information & user search preferences. The table is sharded by user id.
